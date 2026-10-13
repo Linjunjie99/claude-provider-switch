@@ -72,7 +72,7 @@ def cmd_use(paths: Paths, args: argparse.Namespace) -> int:
     if not result.changed:
         print(f"已经是 {args.name}，settings.json 未改动")
         return 0
-    print(f"已切换到 {args.name}（备份: {result.backup}）")
+    print(f"已切换到 {args.name}")
     print("新开的 Claude Code 会话生效；已运行的会话请重启。")
     return 0
 

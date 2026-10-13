@@ -70,7 +70,6 @@ def test_switch_changes_only_url_and_token_bytes(paths: Paths) -> None:
     assert result.changed
     # In-place replacement: even the hand-compacted "hooks" line is untouched.
     assert paths.settings.read_text("utf-8") == expected_text(SETTINGS)
-    assert result.backup.read_text("utf-8") == SETTINGS
 
 
 def test_reorders_nothing_when_a_key_must_be_added(paths: Paths) -> None:
@@ -131,12 +130,11 @@ def test_adds_env_when_missing(paths: Paths) -> None:
 
 def test_noop_when_already_active(paths: Paths) -> None:
     switch(paths, "new")
-    before = paths.settings.read_bytes()
-    backups = list(paths.backups.iterdir())
+    before = paths.settings.stat()
     result = switch(paths, "new")
     assert not result.changed
-    assert paths.settings.read_bytes() == before
-    assert list(paths.backups.iterdir()) == backups
+    assert paths.settings.stat().st_ino == before.st_ino  # file was not replaced
+    assert paths.settings.stat().st_mtime_ns == before.st_mtime_ns
 
 
 @pytest.mark.parametrize(
@@ -165,14 +163,13 @@ def test_refuses_while_vim_swap_exists(paths: Paths) -> None:
 
 
 def test_aborts_if_file_changes_during_switch(paths: Paths, monkeypatch: pytest.MonkeyPatch) -> None:
-    real_backup = core._backup
+    real_verify = core.verify_patch
 
-    def racing_backup(p: Paths, s: core.Settings) -> Path:
-        out = real_backup(p, s)
-        p.settings.write_text(SETTINGS.replace("dark", "light"), "utf-8")
-        return out
+    def racing_verify(old: dict, new_text: str, provider: Provider) -> None:
+        real_verify(old, new_text, provider)
+        paths.settings.write_text(SETTINGS.replace("dark", "light"), "utf-8")
 
-    monkeypatch.setattr(core, "_backup", racing_backup)
+    monkeypatch.setattr(core, "verify_patch", racing_verify)
     with pytest.raises(SwitchError, match="被其他程序修改"):
         switch(paths, "new")
     assert paths.settings.read_text("utf-8") == SETTINGS.replace("dark", "light")
@@ -189,15 +186,11 @@ def test_follows_symlink(paths: Paths, tmp_path: Path) -> None:
     assert json.loads(real.read_text("utf-8"))["env"][core.URL_KEY] == NEW.base_url
 
 
-def test_backups_are_private_and_pruned(paths: Paths) -> None:
-    other = Provider("other", "https://other.example.invalid", "sk-other-222222222222")
-    save_provider(paths, other)
-    for i in range(core.BACKUP_KEEP + 5):
-        switch(paths, "new" if i % 2 == 0 else "other")
-    backups = list(paths.backups.glob("settings.*.json"))
-    assert len(backups) == core.BACKUP_KEEP
-    assert all(stat.S_IMODE(b.stat().st_mode) == 0o600 for b in backups)
-    assert stat.S_IMODE(paths.backups.stat().st_mode) == 0o700
+def test_switch_leaves_no_extra_files(paths: Paths) -> None:
+    before = sorted(p.relative_to(paths.root) for p in paths.root.rglob("*"))
+    switch(paths, "new")
+    after = sorted(p.relative_to(paths.root) for p in paths.root.rglob("*"))
+    assert sorted({*before, Path("providers/.lock")}) == after  # only the writer lock
 
 
 def test_provider_files_are_private_and_strict(paths: Paths) -> None:

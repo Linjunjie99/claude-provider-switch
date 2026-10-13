@@ -14,7 +14,6 @@ import json
 import os
 import re
 import tempfile
-import time
 from dataclasses import dataclass, field
 from json.decoder import scanstring
 from pathlib import Path
@@ -24,7 +23,6 @@ URL_KEY = "ANTHROPIC_BASE_URL"
 TOKEN_KEY = "ANTHROPIC_AUTH_TOKEN"
 MANAGED_KEYS = (URL_KEY, TOKEN_KEY)
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-BACKUP_KEEP = 20
 BOM = b"\xef\xbb\xbf"
 
 
@@ -49,10 +47,6 @@ class Paths:
     def providers(self) -> Path:
         return self.root / "providers"
 
-    @property
-    def backups(self) -> Path:
-        return self.providers / ".backups"
-
 
 @dataclass(frozen=True)
 class Provider:
@@ -68,7 +62,6 @@ class Provider:
 @dataclass
 class SwitchResult:
     changed: bool
-    backup: Path | None = None
     warnings: list[str] = field(default_factory=list)
 
 
@@ -327,16 +320,6 @@ def editor_locks(path: Path) -> list[Path]:
     return [path.parent / n for n in names if os.path.lexists(path.parent / n)]
 
 
-def _backup(paths: Paths, settings: Settings) -> Path:
-    _ensure_private_dir(paths.backups)
-    stamp = time.strftime("%Y%m%d-%H%M%S") + f"-{time.time_ns() % 1_000_000_000:09d}"
-    target = paths.backups / f"settings.{stamp}.json"
-    _atomic_write(target, settings.raw, 0o600)
-    for old in sorted(paths.backups.glob("settings.*.json"))[:-BACKUP_KEEP]:
-        old.unlink()
-    return target
-
-
 @contextlib.contextmanager
 def _lock(paths: Paths) -> Iterator[None]:
     _ensure_private_dir(paths.providers)
@@ -378,8 +361,6 @@ def switch(paths: Paths, name: str, force: bool = False) -> SwitchResult:
         new_text = render_patch(settings.text, new_data)
         verify_patch(settings.data, new_text, provider)
         payload = (BOM if settings.bom else b"") + new_text.encode("utf-8")
-
-        result.backup = _backup(paths, settings)
         _atomic_write(settings.path, payload, settings.mode, expect=settings.raw)
         result.changed = True
         return result

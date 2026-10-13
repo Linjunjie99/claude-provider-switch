@@ -33,8 +33,6 @@ ccp rm other                                     # 删除供应商文件（不�
   格式固定为 `{"env": {"ANTHROPIC_BASE_URL": ..., "ANTHROPIC_AUTH_TOKEN": ...}}`，
   出现其他键会拒绝使用。这个格式也能直接用于单次会话：
   `claude --settings ~/.claude/providers/<name>.json`。
-- 备份：每次实际改动前把原文件原样复制到 `~/.claude/providers/.backups/`，保留最近 20 份。
-  备份里含 settings.json 的全部内容（包括其他 key），权限 0600。
 - 设置 `CLAUDE_CONFIG_DIR` 时，以上路径都以它为根目录。
 
 ## 写入保证
@@ -47,7 +45,7 @@ ccp rm other                                     # 删除供应商文件（不�
 4. 两个键都存在时，只替换这两个值在原文本中的位置，缩进、换行、键顺序、手工排版都保留；
    缺键时追加到 `env` 末尾（这种情况会按原文件缩进重新排版）。
 5. 写入前校验：去掉这两个键后，新旧文档的值和键顺序必须完全一致，否则放弃。
-6. 先备份，再写临时文件并 fsync，替换前重读原文件，期间被别人改过就放弃；
+6. 先写临时文件并 fsync，替换前重读原文件，期间被别人改过就放弃；
    最后原子 rename。保留原文件权限、BOM、CRLF；settings.json 是软链接时写到链接目标。
 7. 同一时间只允许一个 `ccp` 写入（`providers/.lock`）。
 
